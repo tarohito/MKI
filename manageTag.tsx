@@ -4,7 +4,7 @@ import {
   CheckCircle, X, AlertCircle, QrCode, FileText, ChevronLeft, 
   ChevronRight, Trash2, Save, Settings, ShieldCheck, Loader2,
   Server, RefreshCw, Database, Activity, CheckSquare, Package, 
-  Tag, Menu, Layers, User, ArrowRight, Edit, Copy, Lock, Unlock, Calendar, LogOut
+  Tag, Menu, Layers, User, ArrowRight, Edit, Copy, Lock, Unlock, Calendar, LogOut, BarChart3, Image as ImageIcon, Upload
 } from 'lucide-react';
 
 /**
@@ -12,17 +12,17 @@ import {
  */
 
 const STORAGE_KEYS = {
-  TAGS: 'TagManager_Tags_v2',
-  PRODUCTS: 'TagManager_Products_v2',
-  BRANDS: 'TagManager_Brands_v2',
-  USER: 'TagManager_User_v2'
+  TAGS: 'TagManager_Tags_v7',
+  PRODUCTS: 'TagManager_Products_v7',
+  BRANDS: 'TagManager_Brands_v7',
+  USER: 'TagManager_User_v7'
 };
 
 // Data Awal (Seeding)
 const SEED_BRANDS = [
-  { id: 'BR-001', name: 'KopiKu', description: 'Premium Coffee Brand' },
-  { id: 'BR-002', name: 'TehNusantara', description: 'Traditional Tea' },
-  { id: 'BR-003', name: 'SnackMantap', description: 'Local Snacks' }
+  { id: 'BR-001', name: 'KopiKu', description: 'Premium Coffee Brand', image: '' },
+  { id: 'BR-002', name: 'TehNusantara', description: 'Traditional Tea', image: '' },
+  { id: 'BR-003', name: 'SnackMantap', description: 'Local Snacks', image: '' }
 ];
 
 const SEED_PRODUCTS = [
@@ -32,21 +32,50 @@ const SEED_PRODUCTS = [
 ];
 
 // Helper LocalStorage
-const getLS = (key) => {
+const getLS = (key: string) => {
   if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : [];
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
+  } catch (e) {
+    return [];
+  }
 };
 
-const setLS = (key, data) => {
+const setLS = (key: string, data: any) => {
   if (typeof window === 'undefined') return;
   localStorage.setItem(key, JSON.stringify(data));
 };
 
-// Inisialisasi Data jika kosong
+// Generate Dummy Data
+const generateDummyData = () => {
+  return Array.from({ length: 15 }).map((_, i) => {
+    const product = SEED_PRODUCTS[i % SEED_PRODUCTS.length];
+    const brand = SEED_BRANDS.find(b => b.id === product.brandId);
+    const now = Date.now();
+    const timeOffset = Math.floor(Math.random() * 20 * 60 * 60 * 1000);
+    
+    return {
+      id: `QR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      productId: product.id,
+      productName: product.name,
+      brand: brand ? brand.name : 'Unknown',
+      status: i % 4 === 0 ? 'used' : 'unused',
+      scanCount: i % 4 === 0 ? Math.floor(Math.random() * 10) + 1 : 0,
+      pin: i % 2 === 0 ? Math.floor(1000 + Math.random() * 9000).toString() : null,
+      ecc: 'M',
+      createdAt: new Date(now - timeOffset).toISOString()
+    };
+  });
+};
+
+// Inisialisasi Data
 const initStorage = () => {
-  if (getLS(STORAGE_KEYS.BRANDS).length === 0) setLS(STORAGE_KEYS.BRANDS, SEED_BRANDS);
-  if (getLS(STORAGE_KEYS.PRODUCTS).length === 0) setLS(STORAGE_KEYS.PRODUCTS, SEED_PRODUCTS);
+  if (typeof window !== 'undefined') {
+    if (getLS(STORAGE_KEYS.BRANDS).length === 0) setLS(STORAGE_KEYS.BRANDS, SEED_BRANDS);
+    if (getLS(STORAGE_KEYS.PRODUCTS).length === 0) setLS(STORAGE_KEYS.PRODUCTS, SEED_PRODUCTS);
+    if (getLS(STORAGE_KEYS.TAGS).length === 0) setLS(STORAGE_KEYS.TAGS, generateDummyData());
+  }
 };
 initStorage();
 
@@ -54,94 +83,102 @@ initStorage();
  * --- SERVICES ---
  */
 const TagService = {
-  // Hapus data > 24 jam
   cleanupExpired: async () => {
-    return new Promise((resolve) => {
+    return new Promise<number>((resolve) => {
       setTimeout(() => {
-        const allTags = getLS(STORAGE_KEYS.TAGS);
-        const now = Date.now();
-        const oneDayMs = 24 * 60 * 60 * 1000;
-        
-        const validTags = allTags.filter(tag => {
-          const created = new Date(tag.createdAt).getTime();
-          return (now - created) <= oneDayMs;
-        });
+        try {
+          const allTags = getLS(STORAGE_KEYS.TAGS);
+          if (!Array.isArray(allTags)) {
+             resolve(0);
+             return;
+          }
+          const now = Date.now();
+          const oneDayMs = 24 * 60 * 60 * 1000;
+          
+          const validTags = allTags.filter((tag: any) => {
+            const created = new Date(tag.createdAt).getTime();
+            return (now - created) <= oneDayMs;
+          });
 
-        const deletedCount = allTags.length - validTags.length;
-        if (deletedCount > 0) setLS(STORAGE_KEYS.TAGS, validTags);
-        resolve(deletedCount);
+          const deletedCount = allTags.length - validTags.length;
+          if (deletedCount > 0) setLS(STORAGE_KEYS.TAGS, validTags);
+          resolve(deletedCount);
+        } catch (e) {
+          resolve(0);
+        }
       }, 500);
     });
   },
 
-  getTags: async (page = 1, limit = 10, filters = {}) => {
-    // Auto cleanup sebelum fetch
+  getTags: async (page = 1, limit = 10, filters: any = {}) => {
     const deletedCount = await TagService.cleanupExpired();
-    
-    const allTags = getLS(STORAGE_KEYS.TAGS);
+    const rawTags = getLS(STORAGE_KEYS.TAGS);
+    const allTags = Array.isArray(rawTags) ? rawTags : [];
     let results = [...allTags];
 
-    // Filtering
     if (filters.search) {
       const lower = filters.search.toLowerCase();
-      results = results.filter(t => t.id.toLowerCase().includes(lower));
+      results = results.filter((t: any) => t.id.toLowerCase().includes(lower));
     }
     if (filters.status && filters.status !== 'all') {
-      results = results.filter(t => t.status === filters.status);
+      results = results.filter((t: any) => t.status === filters.status);
     }
     if (filters.productId && filters.productId !== 'all') {
-      results = results.filter(t => String(t.productId) === String(filters.productId));
+      results = results.filter((t: any) => String(t.productId) === String(filters.productId));
     }
 
-    // Sorting (Newest First)
-    results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
+    results.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
     const total = results.length;
     const start = (page - 1) * limit;
     const data = results.slice(start, start + limit);
-
     return { data, total, deletedCount };
   },
 
-  getAllIds: async (filters = {}) => {
-    const allTags = getLS(STORAGE_KEYS.TAGS);
+  getAllIds: async (filters: any = {}) => {
+    const rawTags = getLS(STORAGE_KEYS.TAGS);
+    const allTags = Array.isArray(rawTags) ? rawTags : [];
     let results = [...allTags];
-    if (filters.search) results = results.filter(t => t.id.toLowerCase().includes(filters.search.toLowerCase()));
-    if (filters.status && filters.status !== 'all') results = results.filter(t => t.status === filters.status);
-    if (filters.productId && filters.productId !== 'all') results = results.filter(t => String(t.productId) === String(filters.productId));
-    return results.map(t => t.id);
+    if (filters.search) results = results.filter((t: any) => t.id.toLowerCase().includes(filters.search.toLowerCase()));
+    if (filters.status && filters.status !== 'all') results = results.filter((t: any) => t.status === filters.status);
+    if (filters.productId && filters.productId !== 'all') results = results.filter((t: any) => String(t.productId) === String(filters.productId));
+    return results.map((t: any) => t.id);
   },
 
-  getTagsByIds: async (ids) => {
-    const allTags = getLS(STORAGE_KEYS.TAGS);
-    return allTags.filter(t => ids.includes(t.id));
+  getTagsByIds: async (ids: string[]) => {
+    const rawTags = getLS(STORAGE_KEYS.TAGS);
+    const allTags = Array.isArray(rawTags) ? rawTags : [];
+    return allTags.filter((t: any) => ids.includes(t.id));
   },
 
-  generateTags: async (newTags) => {
+  getTagCounts: async () => {
+    const rawTags = getLS(STORAGE_KEYS.TAGS);
+    const allTags = Array.isArray(rawTags) ? rawTags : [];
+    const counts: Record<string, number> = {};
+    allTags.forEach((tag: any) => {
+      counts[tag.productId] = (counts[tag.productId] || 0) + 1;
+    });
+    return counts;
+  },
+
+  generateTags: async (newTags: any[]) => {
     return new Promise((resolve) => {
       setTimeout(() => {
         const current = getLS(STORAGE_KEYS.TAGS);
-        setLS(STORAGE_KEYS.TAGS, [...current, ...newTags]);
+        const safeCurrent = Array.isArray(current) ? current : [];
+        setLS(STORAGE_KEYS.TAGS, [...safeCurrent, ...newTags]);
         resolve(true);
       }, 800);
     });
   },
 
-  updateStatus: async (id, status) => {
-    const current = getLS(STORAGE_KEYS.TAGS);
-    const index = current.findIndex(t => t.id === id);
-    if (index !== -1) {
-      current[index].status = status;
-      setLS(STORAGE_KEYS.TAGS, current);
-    }
-  },
-
-  deleteTags: async (ids) => {
+  deleteTags: async (ids: string[]) => {
     return new Promise((resolve) => {
       setTimeout(() => {
         let current = getLS(STORAGE_KEYS.TAGS);
-        current = current.filter(t => !ids.includes(t.id));
-        setLS(STORAGE_KEYS.TAGS, current);
+        if (!Array.isArray(current)) current = [];
+        const safeCurrent = current.filter((t: any) => !ids.includes(t.id));
+        setLS(STORAGE_KEYS.TAGS, safeCurrent);
         resolve(true);
       }, 500);
     });
@@ -149,38 +186,57 @@ const TagService = {
 };
 
 const ProductService = {
-  getAll: () => getLS(STORAGE_KEYS.PRODUCTS),
-  save: (product) => {
+  getAll: () => {
+    const data = getLS(STORAGE_KEYS.PRODUCTS);
+    return Array.isArray(data) ? data : [];
+  },
+  getProductCounts: async () => {
+    const products = getLS(STORAGE_KEYS.PRODUCTS);
+    const safeProducts = Array.isArray(products) ? products : [];
+    const counts: Record<string, number> = {};
+    safeProducts.forEach((p: any) => {
+      counts[p.brandId] = (counts[p.brandId] || 0) + 1;
+    });
+    return counts;
+  },
+  save: (product: any) => {
     let list = getLS(STORAGE_KEYS.PRODUCTS);
-    const idx = list.findIndex(p => p.id === product.id);
+    if (!Array.isArray(list)) list = [];
+    const idx = list.findIndex((p: any) => p.id === product.id);
     if (idx !== -1) list[idx] = product; else list.push(product);
     setLS(STORAGE_KEYS.PRODUCTS, list);
   },
-  delete: (id) => {
+  delete: (id: string) => {
     let list = getLS(STORAGE_KEYS.PRODUCTS);
-    setLS(STORAGE_KEYS.PRODUCTS, list.filter(p => p.id !== id));
+    if (!Array.isArray(list)) list = [];
+    setLS(STORAGE_KEYS.PRODUCTS, list.filter((p: any) => p.id !== id));
   }
 };
 
 const BrandService = {
-  getAll: () => getLS(STORAGE_KEYS.BRANDS),
-  save: (brand) => {
+  getAll: () => {
+    const data = getLS(STORAGE_KEYS.BRANDS);
+    return Array.isArray(data) ? data : [];
+  },
+  save: (brand: any) => {
     let list = getLS(STORAGE_KEYS.BRANDS);
-    const idx = list.findIndex(b => b.id === brand.id);
+    if (!Array.isArray(list)) list = [];
+    const idx = list.findIndex((b: any) => b.id === brand.id);
     if (idx !== -1) list[idx] = brand; else list.push(brand);
     setLS(STORAGE_KEYS.BRANDS, list);
   },
-  delete: (id) => {
+  delete: (id: string) => {
     let list = getLS(STORAGE_KEYS.BRANDS);
-    setLS(STORAGE_KEYS.BRANDS, list.filter(b => b.id !== id));
+    if (!Array.isArray(list)) list = [];
+    setLS(STORAGE_KEYS.BRANDS, list.filter((b: any) => b.id !== id));
   }
 };
 
 /**
- * --- UI COMPONENTS ---
+ * --- UI COMPONENTS (Defined before use) ---
  */
 
-const Sidebar = ({ activeView, setActiveView, isMobileOpen, setIsMobileOpen, isMinimized }) => {
+const Sidebar = ({ activeView, setActiveView, isMobileOpen, setIsMobileOpen, isMinimized }: any) => {
   const menus = [
     { id: 'tags', label: 'Manajemen Tag', icon: QrCode },
     { id: 'products', label: 'Produk', icon: Package },
@@ -206,7 +262,7 @@ const Sidebar = ({ activeView, setActiveView, isMobileOpen, setIsMobileOpen, isM
   );
 };
 
-const Header = ({ isSidebarMinimized, setIsSidebarMinimized, setIsMobileOpen, user, onLogout }) => (
+const Header = ({ isSidebarMinimized, setIsSidebarMinimized, setIsMobileOpen, user, onLogout }: any) => (
   <header className="bg-white border-b border-gray-200 sticky top-0 z-30 h-16 px-4 sm:px-6 flex items-center justify-between shadow-sm shrink-0">
     <div className="flex items-center gap-4">
       <button onClick={() => setIsSidebarMinimized(!isSidebarMinimized)} className="hidden md:flex p-2 text-gray-500 hover:bg-gray-100 rounded-lg"><Menu size={20} /></button>
@@ -223,19 +279,23 @@ const Header = ({ isSidebarMinimized, setIsSidebarMinimized, setIsMobileOpen, us
   </header>
 );
 
-const StatusBadge = ({ status }) => {
-  const styles = { unused: 'text-gray-600 bg-gray-100', used: 'text-emerald-600 bg-emerald-50', blocked: 'text-rose-600 bg-rose-50' };
+const StatusBadge = ({ status }: { status: string }) => {
+  const styles: any = { 
+    unused: 'text-gray-600 bg-gray-100', 
+    used: 'text-emerald-600 bg-emerald-50', 
+    blocked: 'text-rose-600 bg-rose-50' 
+  };
   return (
-    <span className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 w-fit ${styles[status]}`}>
+    <span className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 w-fit ${styles[status] || styles.unused}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${status === 'unused' ? 'bg-gray-400' : status === 'used' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
       {status === 'unused' ? 'Ready' : status === 'used' ? 'Scanned' : 'Blocked'}
     </span>
   );
 };
 
-const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
+const Modal = ({ isOpen, onClose, title, children, size = 'md' }: any) => {
   if (!isOpen) return null;
-  const sizes = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-7xl' };
+  const sizes: any = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-7xl' };
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className={`bg-white rounded-2xl shadow-2xl w-full ${sizes[size]} max-h-[95vh] flex flex-col`}>
@@ -249,27 +309,86 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
   );
 };
 
-const Toast = ({ message, type, onClose }) => {
+const Toast = ({ message, type, onClose }: any) => {
   useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, [onClose]);
   const styles = type === 'success' ? 'bg-emerald-600' : 'bg-rose-600';
   return <div className={`fixed bottom-6 right-6 ${styles} text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 z-[70] animate-in slide-in-from-bottom-5 duration-300`}><CheckCircle size={20} /><span className="font-medium text-sm">{message}</span></div>;
 };
 
-const QRCodePlaceholder = ({ data, size = 100, ecc = 'M' }) => {
+const QRCodePlaceholder = ({ data, size = 100, ecc = 'M' }: any) => {
   const src = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}&color=000000&bgcolor=ffffff&ecc=${ecc}`;
   return <div className="bg-white p-1 rounded border border-gray-200 inline-block"><img src={src} alt="QR" width={size} height={size} loading="lazy" className="block" /></div>;
+};
+
+// Login Page Component
+const LoginPage = ({ onLogin }: any) => {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+       <div className="bg-white p-8 rounded-xl shadow-xl w-96 text-center">
+          <div className="w-12 h-12 bg-[#C1986E] rounded-full flex items-center justify-center text-white mx-auto mb-4"><QrCode size={24}/></div>
+          <h1 className="text-xl font-bold mb-2">Tag Management System</h1>
+          <p className="text-sm text-gray-500 mb-6">Masuk untuk mengelola produksi.</p>
+          <button onClick={() => onLogin({ name: 'Admin', role: 'Super Admin' })} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">Masuk Dashboard</button>
+          <p className="text-xs text-gray-400 mt-4">Demo Version 2.5</p>
+       </div>
+    </div>
+  );
 };
 
 /**
  * --- PAGES / SUB-VIEWS ---
  */
 
-const BrandManager = ({ showToast }) => {
-  const [brands, setBrands] = useState([]);
+const BrandManager = ({ showToast }: any) => {
+  const [brands, setBrands] = useState<any[]>([]);
+  const [productCounts, setProductCounts] = useState<any>({});
   const [modalOpen, setModalOpen] = useState(false);
-  const [formData, setFormData] = useState({ id: '', name: '', description: '' });
+  const [formData, setFormData] = useState({ id: '', name: '', description: '', image: '' });
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
+  const [isSelectAllGlobal, setIsSelectAllGlobal] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [itemsToDelete, setItemsToDelete] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => { setBrands(BrandService.getAll()); }, [modalOpen]);
+  useEffect(() => { 
+    const fetchData = async () => {
+      const allBrands = await BrandService.getAll();
+      setBrands(allBrands || []); 
+      const counts = await ProductService.getProductCounts();
+      setProductCounts(counts || {});
+    }
+    fetchData();
+  }, [modalOpen, deleteModalOpen]);
+
+  const filteredBrands = brands.filter(b => b.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const totalRecords = filteredBrands.length;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedBrands = filteredBrands.slice(startIndex, startIndex + itemsPerPage);
+  
+  const isAllCurrentPageSelected = paginatedBrands.length > 0 && paginatedBrands.every(b => selectedBrands.includes(b.id));
+
+  const handleSelectAll = (e: any) => {
+    if (e.target.checked) {
+      const pageIds = paginatedBrands.map(b => b.id);
+      setSelectedBrands([...new Set([...selectedBrands, ...pageIds])]);
+    } else {
+      const pageIds = paginatedBrands.map(b => b.id);
+      setSelectedBrands(selectedBrands.filter(id => !pageIds.includes(id)));
+      setIsSelectAllGlobal(false);
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    selectedBrands.includes(id) ? setSelectedBrands(selectedBrands.filter(bid => bid !== id)) : setSelectedBrands([...selectedBrands, id]);
+  };
+
+  const handleSelectAllGlobal = () => {
+    setSelectedBrands(filteredBrands.map(b => b.id));
+    setIsSelectAllGlobal(true);
+  };
 
   const handleSave = () => {
     if (!formData.name) return showToast('Nama wajib diisi', 'error');
@@ -279,8 +398,32 @@ const BrandManager = ({ showToast }) => {
     setModalOpen(false);
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Hapus brand?')) { BrandService.delete(id); showToast('Terhapus', 'success'); setBrands(BrandService.getAll()); }
+  const initiateDelete = (ids: string[]) => {
+    const brandsWithProducts = ids.filter(id => (productCounts[id] || 0) > 0);
+    if (brandsWithProducts.length > 0) return showToast(`Gagal: ${brandsWithProducts.length} brand masih memiliki produk aktif.`, 'error');
+    setItemsToDelete(ids);
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDelete = () => {
+    itemsToDelete.forEach(id => BrandService.delete(id));
+    showToast(`${itemsToDelete.length} brand dihapus`, 'success');
+    setItemsToDelete([]);
+    setSelectedBrands([]);
+    setDeleteModalOpen(false);
+  };
+
+  // Image Handler
+  const handleImageUpload = (e: any) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 500 * 1024) return showToast('Ukuran gambar maks 500KB', 'error');
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData(prev => ({ ...prev, image: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   return (
@@ -288,35 +431,129 @@ const BrandManager = ({ showToast }) => {
       {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
         <div><h2 className="text-2xl font-bold">Manajemen Brand</h2><p className="text-sm text-gray-500">Daftar merek produk yang tersedia.</p></div>
-        <button onClick={() => { setFormData({id:'',name:'',description:''}); setModalOpen(true); }} className="px-4 py-2 bg-[#C1986E] text-white rounded-lg flex gap-2 font-medium"><Plus size={18}/> Tambah</button>
+        <div className="flex gap-2">
+          {selectedBrands.length > 0 && (
+             <button onClick={() => initiateDelete(selectedBrands)} className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-sm font-medium hover:bg-rose-50"><Trash2 size={16}/> Hapus ({selectedBrands.length})</button>
+          )}
+          <button onClick={() => { setFormData({id:'',name:'',description:'', image: ''}); setModalOpen(true); }} className="px-4 py-2 bg-[#C1986E] text-white rounded-lg flex gap-2 font-medium"><Plus size={18}/> Tambah</button>
+        </div>
       </div>
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-auto flex-1">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b sticky top-0"><tr><th className="p-4 text-xs font-bold text-gray-500 uppercase">Nama</th><th className="p-4 text-xs font-bold text-gray-500 uppercase">Deskripsi</th><th className="p-4 text-right">Aksi</th></tr></thead>
-          <tbody>
-            {brands.length === 0 ? <tr><td colSpan={3} className="p-8 text-center text-gray-400">Belum ada data</td></tr> :
-            brands.map(b => (<tr key={b.id} className="hover:bg-gray-50"><td className="p-4 font-bold">{b.name}<br/><span className="text-xs text-gray-400 font-normal">{b.id}</span></td><td className="p-4 text-sm">{b.description}</td><td className="p-4 text-right"><button onClick={() => handleDelete(b.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></td></tr>))}
-          </tbody>
-        </table>
+
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 shrink-0 grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+        <div className="md:col-span-10"><label className="text-xs font-bold text-gray-500 block mb-1">Cari Brand</label><div className="relative"><Search className="absolute left-3 top-2 text-gray-400" size={16}/><input type="text" className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm" placeholder="Nama Brand..." value={searchTerm} onChange={e=>{setSearchTerm(e.target.value); setCurrentPage(1);}}/></div></div>
+        <div className="md:col-span-2 text-right text-sm text-gray-500 pb-2">Total: <b>{totalRecords}</b></div>
       </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
+        {selectedBrands.length > 0 && !isSelectAllGlobal && totalRecords > selectedBrands.length && (
+           <div className="bg-blue-50 p-2 text-center text-sm text-blue-800 border-b cursor-pointer hover:underline" onClick={handleSelectAllGlobal}>Pilih semua {totalRecords} data di database?</div>
+        )}
+        
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-left">
+            <thead className="bg-white border-b sticky top-0 z-10">
+              <tr>
+                <th className="p-5 w-10 text-center"><input type="checkbox" checked={isAllCurrentPageSelected} onChange={handleSelectAll} className="rounded text-[#C1986E] focus:ring-[#C1986E]"/></th>
+                <th className="p-5 text-xs font-bold text-gray-400 uppercase">Brand</th>
+                <th className="p-5 text-xs font-bold text-gray-400 uppercase">Deskripsi</th>
+                <th className="p-5 text-xs font-bold text-gray-400 uppercase">Produk</th>
+                <th className="p-5 text-right text-xs font-bold text-gray-400 uppercase">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {paginatedBrands.length === 0 ? <tr><td colSpan={5} className="p-12 text-center text-gray-400">Belum ada data</td></tr> :
+              paginatedBrands.map(b => (
+                <tr key={b.id} className={`hover:bg-[#C1986E]/5 transition-colors ${selectedBrands.includes(b.id) ? 'bg-[#C1986E]/5' : ''}`}>
+                  <td className="p-5 text-center"><input type="checkbox" checked={selectedBrands.includes(b.id)} onChange={() => handleSelectOne(b.id)} className="rounded text-[#C1986E] focus:ring-[#C1986E]"/></td>
+                  <td className="p-5">
+                    <div className="flex items-center gap-3">
+                       <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center overflow-hidden">
+                          {b.image ? <img src={b.image} alt={b.name} className="w-full h-full object-cover"/> : <ImageIcon size={20} className="text-gray-400"/>}
+                       </div>
+                       <div>
+                          <div className="font-bold text-gray-800">{b.name}</div>
+                          <div className="text-xs text-gray-400 font-mono mt-0.5">{b.id}</div>
+                       </div>
+                    </div>
+                  </td>
+                  <td className="p-5 text-sm text-gray-600">{b.description}</td>
+                  <td className="p-5"><div className="flex items-center gap-2"><Package size={16} className="text-gray-400"/><span className="text-sm font-medium text-gray-700">{productCounts[b.id] || 0}</span></div></td>
+                  <td className="p-5 text-right"><div className="flex justify-end gap-2"><button onClick={() => { setFormData(b); setModalOpen(true); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit size={16}/></button><button onClick={() => initiateDelete([b.id])} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        
+        <div className="p-3 border-t bg-gray-50 flex justify-between items-center shrink-0">
+          <span className="text-xs text-gray-500">Hal {currentPage} ({totalRecords} data)</span>
+          <div className="flex gap-2">
+            <button onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage===1} className="p-1 border rounded bg-white hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16}/></button>
+            <button onClick={() => setCurrentPage(p => p+1)} disabled={paginatedBrands.length < itemsPerPage} className="p-1 border rounded bg-white hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16}/></button>
+          </div>
+        </div>
+      </div>
+
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Form Brand" size="sm">
         <div className="space-y-4">
-          <div><label className="text-sm font-bold text-gray-700">Nama Brand</label><input type="text" className="w-full p-2 border rounded mt-1" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-          <div><label className="text-sm font-bold text-gray-700">Deskripsi</label><textarea className="w-full p-2 border rounded mt-1" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
-          <button onClick={handleSave} className="w-full py-2 bg-[#C1986E] text-white rounded font-medium">Simpan</button>
+          <div><label className="text-sm font-bold text-gray-700">Nama Brand</label><input type="text" className="w-full p-2.5 border rounded-lg mt-1" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+          
+          <div>
+            <label className="text-sm font-bold text-gray-700">Logo Brand</label>
+            <div className="flex items-center gap-4 mt-1">
+               <div className="w-16 h-16 rounded-lg bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center overflow-hidden">
+                   {formData.image ? <img src={formData.image} className="w-full h-full object-cover" /> : <ImageIcon size={24} className="text-gray-300"/>}
+               </div>
+               <label className="flex-1 cursor-pointer">
+                  <div className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-center hover:bg-gray-50">Upload Gambar</div>
+                  <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload}/>
+                  <p className="text-[10px] text-gray-400 mt-1">Max 500KB</p>
+               </label>
+            </div>
+          </div>
+          
+          <div><label className="text-sm font-bold text-gray-700">Deskripsi</label><textarea className="w-full p-2.5 border rounded-lg mt-1" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+          <button onClick={handleSave} className="w-full py-2.5 bg-[#C1986E] text-white rounded-lg font-medium">Simpan</button>
         </div>
+      </Modal>
+
+      <Modal isOpen={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Hapus Brand" size="sm">
+         <div className="text-center p-4">
+            <div className="bg-red-50 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3"><Trash2 size={32} className="text-red-500"/></div>
+            <p>Hapus <b>{itemsToDelete.length} brand</b>? Data tidak bisa dikembalikan.</p>
+            <div className="flex gap-2 mt-6"><button onClick={() => setDeleteModalOpen(false)} className="flex-1 py-2.5 border rounded-lg text-sm font-medium">Batal</button><button onClick={confirmDelete} className="flex-1 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium">Hapus</button></div>
+         </div>
       </Modal>
     </div>
   );
 };
 
-const ProductManager = ({ showToast }) => {
-  const [products, setProducts] = useState([]);
-  const [brands, setBrands] = useState([]);
+const ProductManager = ({ showToast }: any) => {
+  const [products, setProducts] = useState<any[]>([]);
+  const [brands, setBrands] = useState<any[]>([]);
+  const [tagCounts, setTagCounts] = useState<any>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [formData, setFormData] = useState({ id: '', name: '', brandId: '', sku: '' });
+  
+  // State: Pagination & Selection
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [itemsToDelete, setItemsToDelete] = useState<string[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [isSelectAllGlobal, setIsSelectAllGlobal] = useState(false);
+  const [filterBrand, setFilterBrand] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => { setProducts(ProductService.getAll()); setBrands(BrandService.getAll()); }, [modalOpen]);
+  useEffect(() => { 
+    const fetchData = async () => {
+      setProducts(await ProductService.getAll() || []); 
+      setBrands(await BrandService.getAll() || []);
+      const counts = await TagService.getTagCounts();
+      setTagCounts(counts || {});
+    };
+    fetchData();
+  }, [modalOpen, deleteModalOpen]);
 
   const handleSave = () => {
     if (!formData.name || !formData.brandId) return showToast('Lengkapi data', 'error');
@@ -326,35 +563,169 @@ const ProductManager = ({ showToast }) => {
     setModalOpen(false);
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Hapus produk?')) { ProductService.delete(id); showToast('Terhapus', 'success'); setProducts(ProductService.getAll()); }
+  const initiateDelete = (ids: string[]) => {
+    const productsWithTags = ids.filter(id => (tagCounts[id] || 0) > 0);
+    if (productsWithTags.length > 0) {
+      if (ids.length === 1) return showToast(`Gagal: Produk ini memiliki ${tagCounts[ids[0]]} tag aktif.`, 'error');
+      else return showToast(`Gagal: ${productsWithTags.length} produk memiliki tag aktif. Hapus tag terlebih dahulu.`, 'error');
+    }
+    setItemsToDelete(ids);
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDelete = () => {
+    itemsToDelete.forEach(id => ProductService.delete(id));
+    showToast(`${itemsToDelete.length} produk dihapus`, 'success');
+    setItemsToDelete([]);
+    setSelectedProducts([]);
+    setDeleteModalOpen(false);
+    setProducts(ProductService.getAll());
+  };
+
+  const filteredProducts = products.filter(p => {
+    const matchSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchBrand = filterBrand === 'all' || p.brandId === filterBrand;
+    return matchSearch && matchBrand;
+  });
+
+  const totalRecords = filteredProducts.length;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + itemsPerPage);
+  const isAllCurrentPageSelected = paginatedProducts.length > 0 && paginatedProducts.every(p => selectedProducts.includes(p.id));
+
+  const handleSelectAll = (e: any) => {
+    if (e.target.checked) {
+      const pageIds = paginatedProducts.map(p => p.id);
+      setSelectedProducts([...new Set([...selectedProducts, ...pageIds])]);
+    } else {
+      const pageIds = paginatedProducts.map(p => p.id);
+      setSelectedProducts(selectedProducts.filter(id => !pageIds.includes(id)));
+      setIsSelectAllGlobal(false);
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    selectedProducts.includes(id) ? setSelectedProducts(selectedProducts.filter(pid => pid !== id)) : setSelectedProducts([...selectedProducts, id]);
+  };
+
+  const handleSelectAllGlobal = () => {
+    setSelectedProducts(filteredProducts.map(p => p.id));
+    setIsSelectAllGlobal(true);
   };
 
   return (
     <div className="flex flex-col h-full gap-4">
-      <div className="flex justify-between items-center"><h2 className="text-2xl font-bold">Manajemen Produk</h2><button onClick={() => { setFormData({id:'',name:'',brandId:'',sku:''}); setModalOpen(true); }} className="px-4 py-2 bg-[#C1986E] text-white rounded-lg flex gap-2 font-medium"><Plus size={18}/> Tambah</button></div>
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-auto flex-1">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b"><tr><th className="p-4 text-xs font-bold text-gray-500 uppercase">Produk</th><th className="p-4 text-xs font-bold text-gray-500 uppercase">Brand</th><th className="p-4 text-right">Aksi</th></tr></thead>
-          <tbody>
-            {products.length === 0 ? <tr><td colSpan={3} className="p-8 text-center text-gray-400">Belum ada data</td></tr> :
-            products.map(p => (<tr key={p.id} className="hover:bg-gray-50"><td className="p-4 font-bold">{p.name}<br/><span className="text-xs text-gray-400 font-normal">SKU: {p.sku}</span></td><td className="p-4 text-sm">{brands.find(b=>b.id===p.brandId)?.name}</td><td className="p-4 text-right"><button onClick={() => handleDelete(p.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></td></tr>))}
-          </tbody>
-        </table>
-      </div>
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Form Produk" size="md">
-        <div className="space-y-4">
-          <input type="text" placeholder="Nama Produk" className="w-full p-2 border rounded" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-          <input type="text" placeholder="SKU (Opsional)" className="w-full p-2 border rounded" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
-          <select className="w-full p-2 border rounded bg-white" value={formData.brandId} onChange={e => setFormData({...formData, brandId: e.target.value})}><option value="">Pilih Brand</option>{brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
-          <button onClick={handleSave} className="w-full py-2 bg-[#C1986E] text-white rounded">Simpan</button>
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+        <div><h2 className="text-2xl font-bold">Manajemen Produk</h2><p className="text-sm text-gray-500">Katalog produk untuk generate tag.</p></div>
+        <div className="flex gap-2">
+          {selectedProducts.length > 0 && (
+             <button onClick={() => initiateDelete(selectedProducts)} className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-sm font-medium hover:bg-rose-50"><Trash2 size={16}/> Hapus ({selectedProducts.length})</button>
+          )}
+          <button onClick={() => { setFormData({id:'',name:'',brandId:'',sku:''}); setModalOpen(true); }} className="flex items-center gap-2 px-4 py-2 bg-[#C1986E] text-white rounded-lg text-sm font-medium hover:bg-[#A67C52]"><Plus size={16}/> Tambah Produk</button>
         </div>
+      </div>
+      
+      {/* FILTERS */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 shrink-0 grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+        <div className="md:col-span-5"><label className="text-xs font-bold text-gray-500 block mb-1">Cari Produk</label><div className="relative"><Search className="absolute left-3 top-2 text-gray-400" size={16}/><input type="text" className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm" placeholder="Nama / SKU..." value={searchTerm} onChange={e=>{setSearchTerm(e.target.value); setCurrentPage(1);}}/></div></div>
+        <div className="md:col-span-5"><label className="text-xs font-bold text-gray-500 block mb-1">Filter Brand</label><select className="w-full p-2 border rounded-lg text-sm" value={filterBrand} onChange={e=>{setFilterBrand(e.target.value); setCurrentPage(1);}}><option value="all">Semua Brand</option>{brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
+        <div className="md:col-span-2 text-right text-sm text-gray-500 pb-2">Total: <b>{totalRecords}</b></div>
+      </div>
+
+      {/* TABLE */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
+        {selectedProducts.length > 0 && !isSelectAllGlobal && totalRecords > selectedProducts.length && (
+           <div className="bg-blue-50 p-2 text-center text-sm text-blue-800 border-b cursor-pointer hover:underline" onClick={handleSelectAllGlobal}>Pilih semua {totalRecords} data di database?</div>
+        )}
+        
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-left">
+            <thead className="bg-white sticky top-0 z-10 border-b">
+              <tr>
+                <th className="p-5 w-10 text-center"><input type="checkbox" checked={isAllCurrentPageSelected} onChange={handleSelectAll} className="rounded text-[#C1986E] focus:ring-[#C1986E]"/></th>
+                <th className="p-5 text-xs font-bold text-gray-400 uppercase">Produk Info</th>
+                <th className="p-5 text-xs font-bold text-gray-400 uppercase">Brand</th>
+                <th className="p-5 text-xs font-bold text-gray-400 uppercase">Statistik</th>
+                <th className="p-5 text-right text-xs font-bold text-gray-400 uppercase">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-12 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4"><Package size={32} className="text-gray-300" /></div>
+                      <h3 className="text-lg font-bold text-gray-800">Tidak Ada Produk</h3>
+                      <p className="text-sm text-gray-500 mt-1">Belum ada produk yang sesuai kriteria.</p>
+                      <button onClick={() => { setFormData({id:'',name:'',brandId:'',sku:''}); setModalOpen(true); }} className="mt-4 text-[#C1986E] font-bold text-sm hover:underline">+ Tambah Produk Baru</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                paginatedProducts.map(p => (
+                  <tr key={p.id} className={`hover:bg-[#C1986E]/5 transition-colors ${selectedProducts.includes(p.id) ? 'bg-[#C1986E]/5' : ''}`}>
+                    <td className="p-5 text-center"><input type="checkbox" checked={selectedProducts.includes(p.id)} onChange={() => handleSelectOne(p.id)} className="rounded text-[#C1986E] focus:ring-[#C1986E]"/></td>
+                    <td className="p-5">
+                      <div className="font-bold text-gray-800">{p.name}</div>
+                      <div className="text-xs text-gray-400 font-mono mt-0.5">SKU: {p.sku || '-'}</div>
+                    </td>
+                    <td className="p-5">
+                      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                        {brands.find(b=>b.id===p.brandId)?.name || 'Unknown'}
+                      </span>
+                    </td>
+                    <td className="p-5">
+                       <div className="flex items-center gap-2">
+                          <BarChart3 size={16} className="text-gray-400"/><span className="text-sm font-medium text-gray-700">{tagCounts[p.id] || 0} Tags</span>
+                       </div>
+                    </td>
+                    <td className="p-5 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => { setFormData(p); setModalOpen(true); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit size={16}/></button>
+                        <button onClick={() => initiateDelete([p.id])} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        
+        <div className="p-3 border-t bg-gray-50 flex justify-between items-center shrink-0">
+          <span className="text-xs text-gray-500">Hal {currentPage} ({totalRecords} data)</span>
+          <div className="flex gap-2">
+            <button onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage===1} className="p-1 border rounded bg-white hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16}/></button>
+            <button onClick={() => setCurrentPage(p => p+1)} disabled={paginatedProducts.length < itemsPerPage} className="p-1 border rounded bg-white hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16}/></button>
+          </div>
+        </div>
+      </div>
+
+      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={formData.id ? "Edit Produk" : "Tambah Produk"} size="md">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nama Produk</label><input type="text" className="w-full p-2.5 border rounded-lg" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+            <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">SKU</label><input type="text" className="w-full p-2.5 border rounded-lg" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} /></div>
+          </div>
+          <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Brand</label><select className="w-full p-2.5 border rounded-lg bg-white" value={formData.brandId} onChange={e => setFormData({...formData, brandId: e.target.value})}><option value="">Pilih Brand</option>{brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
+          <button onClick={handleSave} className="w-full py-2.5 bg-[#C1986E] text-white rounded-lg font-bold hover:bg-[#A67C52] transition-colors">Simpan Produk</button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Hapus Produk" size="sm">
+         <div className="text-center p-4">
+            <div className="bg-red-50 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3"><Trash2 size={32} className="text-red-500"/></div>
+            <h3 className="text-lg font-bold text-gray-800">Konfirmasi Hapus</h3>
+            <p className="text-sm text-gray-500 mt-2">Anda yakin ingin menghapus <b>{itemsToDelete.length} produk</b>? <br/>Data yang dihapus tidak dapat dikembalikan.</p>
+            <div className="flex gap-2 mt-6"><button onClick={() => setDeleteModalOpen(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">Batal</button><button onClick={confirmDelete} className="flex-1 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors shadow-sm">Ya, Hapus</button></div>
+         </div>
       </Modal>
     </div>
   );
 };
 
-const TagDashboard = ({ showToast }) => {
+const TagDashboard = ({ showToast }: any) => {
   const [tags, setTags] = useState([]);
   const [products, setProducts] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -383,12 +754,12 @@ const TagDashboard = ({ showToast }) => {
       ProductService.getAll(),
       BrandService.getAll()
     ]);
-    setTags(tagRes.data);
+    setTags(tagRes.data || []);
     setTotalRecords(tagRes.total);
     setProducts(prodRes);
     setBrands(brandRes);
     setLoading(false);
-    if (tagRes.deletedCount > 0) showToast(`Otomatis membersihkan ${tagRes.deletedCount} tag lama`, 'success');
+    if (tagRes.deletedCount > 0) showToast(`Otomatis menghapus ${tagRes.deletedCount} tag usang (>24 jam)`, 'success');
     if (!isSelectAllGlobal) setSelectedTags([]);
   }, [currentPage, searchTerm, filterStatus, filterProduct]);
 
@@ -403,8 +774,7 @@ const TagDashboard = ({ showToast }) => {
     setOpLoading(true);
     const prod = getProduct(genForm.productId);
     const newTags = [];
-    
-    const genPin = (len) => Array.from({length: len}, () => Math.floor(Math.random()*10)).join('');
+    const genPin = (len: number) => Array.from({length: len}, () => Math.floor(Math.random()*10)).join('');
 
     for(let i=0; i<genForm.quantity; i++) {
       newTags.push({
@@ -420,46 +790,10 @@ const TagDashboard = ({ showToast }) => {
       });
     }
     await TagService.generateTags(newTags);
-    showToast('Tag berhasil dibuat', 'success');
+    showToast('Generate berhasil', 'success');
     setModal({...modal, generate: false});
     setOpLoading(false);
     loadData();
-  };
-
-  const handlePrint = async () => {
-    setOpLoading(true);
-    // NEW LOGIC: Jika ada seleksi manual, cetak itu. Jika tidak, cetak SEMUA hasil filter.
-    let dataToPrint = [];
-    
-    if (selectedTags.length > 0) {
-      // Prioritas 1: Seleksi Manual (bisa lebih dari 10 jika pakai select all global)
-      dataToPrint = await TagService.getTagsByIds(selectedTags);
-    } else {
-      // Prioritas 2: Cetak Semua hasil filter (Batch Print)
-      // Ambil semua ID yang sesuai dengan filter pencarian/status/produk saat ini
-      const allIds = await TagService.getAllIds({ search: searchTerm, status: filterStatus, productId: filterProduct });
-      
-      if (allIds.length === 0) {
-        showToast('Tidak ada data yang bisa dicetak', 'error');
-        setOpLoading(false);
-        return;
-      }
-      
-      // Safety check agar browser tidak crash jika terlalu banyak
-      if (allIds.length > 2000) {
-         if(!confirm(`Anda akan mencetak ${allIds.length} tag. Ini mungkin memakan waktu. Lanjutkan?`)) {
-            setOpLoading(false);
-            return;
-         }
-      }
-
-      dataToPrint = await TagService.getTagsByIds(allIds);
-      showToast(`Memuat ${dataToPrint.length} tag untuk dicetak...`, 'success');
-    }
-
-    setPrintData(dataToPrint);
-    setModal({...modal, print: true});
-    setOpLoading(false);
   };
 
   const handleDelete = async () => {
@@ -473,25 +807,40 @@ const TagDashboard = ({ showToast }) => {
     loadData();
   };
 
+  const handlePrintPreview = async () => {
+    setOpLoading(true);
+    const data = await TagService.getTagsByIds(selectedTags);
+    setPrintData(data);
+    setModal({...modal, print: true});
+    setOpLoading(false);
+  };
+
   const handleSelectAllGlobal = async () => {
-    const ids = await TagService.getAllIds({ search: searchTerm, status: filterStatus, productId: filterProduct });
-    setSelectedTags(ids);
+    setOpLoading(true);
+    const allIds = await TagService.getAllIds({ search: searchTerm, status: filterStatus, productId: filterProduct });
+    setSelectedTags(allIds);
     setIsSelectAllGlobal(true);
-    showToast(`Terpilih ${ids.length} data`, 'success');
+    showToast(`Berhasil memilih ${allIds.length} data`, 'success');
   };
 
   const calculatedPages = useMemo(() => {
-    if (!printData.length) return { pages: [], cols: 0, rows: 0, itemsPerPage: 0 };
+    const defaultResult = { pages: [], cols: 0, rows: 0, itemsPerPage: 0 };
+    if (!printData.length) return defaultResult;
+
     const { paperWidth, paperHeight, stickerSizeMm, gapMm, marginMm } = printSettings;
     const contentW = paperWidth - (marginMm * 2);
     const contentH = paperHeight - (marginMm * 2);
     const cols = Math.floor((contentW + gapMm) / (stickerSizeMm + gapMm));
     const rows = Math.floor((contentH + gapMm) / (stickerSizeMm + gapMm));
     const itemsPerPage = cols * rows;
-    if (itemsPerPage <= 0) return { pages: [], cols: 0, rows: 0, itemsPerPage: 0 };
-    
+
+    if (itemsPerPage <= 0) return defaultResult;
+
     const pages = [];
-    for (let i = 0; i < printData.length; i += itemsPerPage) pages.push(printData.slice(i, i + itemsPerPage));
+    for (let i = 0; i < printData.length; i += itemsPerPage) {
+      pages.push(printData.slice(i, i + itemsPerPage));
+    }
+
     return { pages, cols, rows, itemsPerPage };
   }, [printData, printSettings]);
 
@@ -505,11 +854,6 @@ const TagDashboard = ({ showToast }) => {
     showToast('Copied', 'success');
   };
 
-  // Logic untuk disable tombol cetak
-  // Tombol aktif jika: Ada data di tabel (totalRecords > 0)
-  // Text tombol berubah tergantung ada seleksi atau tidak
-  const isPrintDisabled = totalRecords === 0;
-
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Header Controls */}
@@ -517,16 +861,7 @@ const TagDashboard = ({ showToast }) => {
         <div><h2 className="text-2xl font-bold">Manajemen Tag</h2><p className="text-sm text-gray-500">Pantau dan kelola QR Code produksi.</p></div>
         <div className="flex gap-2">
            {selectedTags.length > 0 && <button onClick={() => setModal({...modal, delete: true})} className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg"><Trash2 size={16}/> Hapus ({selectedTags.length})</button>}
-           
-           <button 
-             onClick={handlePrint} 
-             disabled={isPrintDisabled} 
-             className={`flex items-center gap-2 px-4 py-2 rounded-lg border font-medium transition-colors ${!isPrintDisabled ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
-           >
-             <Printer size={16}/> 
-             {selectedTags.length > 0 ? `Cetak (${selectedTags.length})` : 'Cetak Semua'}
-           </button>
-           
+           <button onClick={handlePrintPreview} disabled={selectedTags.length===0} className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${selectedTags.length > 0 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-100 text-gray-400'}`}><Printer size={16}/> Cetak</button>
            <button onClick={() => setModal({...modal, generate: true})} className="flex items-center gap-2 px-4 py-2 bg-[#C1986E] text-white rounded-lg"><Plus size={16}/> Generate</button>
         </div>
       </div>
@@ -678,24 +1013,57 @@ const TagDashboard = ({ showToast }) => {
          </div>
       </Modal>
 
-      <Modal isOpen={modal.detail} onClose={() => setModal({...modal, detail: false})} title="Detail Tag" size="md">
+      <Modal isOpen={modal.detail} onClose={() => setModal({...modal, detail: false})} title="Detail Informasi Tag" size="md">
         {detailData && (
           <div className="space-y-6">
-             <div className="flex gap-4">
-                <div className="p-3 bg-white border rounded-lg shadow-sm"><QRCodePlaceholder data={detailData.id} size={120} ecc={detailData.ecc}/></div>
-                <div className="flex-1 space-y-2">
-                   <div><label className="text-xs font-bold text-gray-400 uppercase">Tag ID</label><div className="font-mono text-xl font-bold">{detailData.id}</div></div>
-                   <div><label className="text-xs font-bold text-gray-400 uppercase">Produk</label><div className="font-medium">{detailData.productName}</div></div>
-                   <div className="flex gap-4">
-                      <div><label className="text-xs font-bold text-gray-400 uppercase">Status</label><div className="mt-1"><StatusBadge status={detailData.status === 'blocked' ? 'blocked' : (detailData.scanCount > 0 ? 'used' : 'unused')} /></div></div>
-                      <div><label className="text-xs font-bold text-gray-400 uppercase">Scans</label><div className="mt-1 font-bold text-xl flex items-center gap-1"><Activity size={16} className="text-[#C1986E]"/> {detailData.scanCount}</div></div>
+             <div className="bg-gradient-to-br from-gray-900 to-gray-800 p-6 rounded-2xl text-white flex gap-6 shadow-xl relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-[#C1986E] opacity-10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+               <div className="relative shrink-0 bg-white p-2 rounded-xl shadow-lg">
+                  <QRCodePlaceholder data={detailData.id} size={100} ecc={detailData.ecc} />
+               </div>
+               <div className="relative flex-1 flex flex-col justify-center">
+                  <h3 className="text-2xl font-mono font-bold tracking-wide">{detailData.id}</h3>
+                  <div className="mt-2 flex items-center gap-2">
+                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${detailData.status === 'unused' ? 'bg-[#C1986E] text-white' : 'bg-gray-700 text-gray-300'}`}>
+                       {detailData.status}
+                     </span>
+                     <span className="text-xs text-gray-400 font-medium">SKU: {getSKU(detailData.productId)}</span>
+                  </div>
+               </div>
+             </div>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                   <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Produk</div>
+                   <div className="font-bold text-gray-900 text-sm leading-snug">{detailData.productName}</div>
+                   <div className="text-xs text-gray-500 mt-1">{detailData.brand}</div>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                   <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Aktivitas</div>
+                   <div className="flex items-center gap-2">
+                      <Activity size={18} className="text-[#C1986E]" />
+                      <span className="font-bold text-xl text-gray-900">{detailData.scanCount}</span>
+                      <span className="text-xs text-gray-500">kali dipindai</span>
                    </div>
                 </div>
              </div>
-             <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border">
-                <div><label className="text-xs text-gray-400 uppercase">PIN</label><div className="font-mono font-bold">{detailData.pin || '-'}</div></div>
-                <div><label className="text-xs text-gray-400 uppercase">ECC</label><div className="font-mono font-bold">{detailData.ecc}</div></div>
-                <div><label className="text-xs text-gray-400 uppercase">Dibuat</label><div className="text-sm">{new Date(detailData.createdAt).toLocaleString()}</div></div>
+             <div className="border-t border-gray-100 pt-4">
+                <h4 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                   <Settings size={16} className="text-gray-400" /> Spesifikasi Teknis
+                </h4>
+                <div className="grid grid-cols-3 gap-y-4 gap-x-2">
+                   <div>
+                      <div className="text-[10px] text-gray-400 uppercase">PIN Security</div>
+                      <div className="font-mono text-sm font-medium text-gray-700 mt-0.5">{detailData.pin || 'Non-aktif'}</div>
+                   </div>
+                   <div>
+                      <div className="text-[10px] text-gray-400 uppercase">ECC Level</div>
+                      <div className="font-mono text-sm font-medium text-gray-700 mt-0.5">{detailData.ecc}</div>
+                   </div>
+                   <div>
+                      <div className="text-[10px] text-gray-400 uppercase">Dibuat Pada</div>
+                      <div className="text-sm font-medium text-gray-700 mt-0.5">{new Date(detailData.createdAt).toLocaleDateString()}</div>
+                   </div>
+                </div>
              </div>
           </div>
         )}
@@ -711,22 +1079,7 @@ const TagDashboard = ({ showToast }) => {
   );
 };
 
-// Login Page
-const LoginPage = ({ onLogin }) => {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-       <div className="bg-white p-8 rounded-xl shadow-xl w-96 text-center">
-          <div className="w-12 h-12 bg-[#C1986E] rounded-full flex items-center justify-center text-white mx-auto mb-4"><QrCode size={24}/></div>
-          <h1 className="text-xl font-bold mb-2">Tag Management System</h1>
-          <p className="text-sm text-gray-500 mb-6">Masuk untuk mengelola produksi.</p>
-          <button onClick={() => onLogin({ name: 'Admin', role: 'Super Admin' })} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">Masuk Dashboard</button>
-          <p className="text-xs text-gray-400 mt-4">Demo Version 2.5</p>
-       </div>
-    </div>
-  );
-};
-
-// Main App
+// ... (Layout & Export Default remain same)
 export default function TagManagementProduction() {
   const [activeView, setActiveView] = useState('tags');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
